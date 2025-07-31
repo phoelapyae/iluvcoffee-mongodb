@@ -1,18 +1,20 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Coffee } from './entities/coffee.entities';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import { Connection, Model, Types } from 'mongoose';
 import { CreateCoffeeDto } from './dto/create-coffee.dto/create-coffee.dto';
 import { PaginationQueryDto } from 'src/common/dto/pagination-query/pagination-query.dto';
 
 @Injectable()
 export class CoffeesService {
     constructor(
-        @InjectModel(Coffee.name) private readonly coffeeModel: Model<Coffee>
-    ){}
+        @InjectModel(Coffee.name) private readonly coffeeModel: Model<Coffee>,
+        @InjectConnection() private readonly connection: Connection,
+        @InjectModel(Event.name) private readonly eventMovel: Model<Event>
+    ) { }
 
     findAll(paginationQuery: PaginationQueryDto) {
-        const {offset, limit} = paginationQuery;
+        const { offset, limit } = paginationQuery;
         return this.coffeeModel.find().skip(offset).limit(limit).exec();
     }
 
@@ -60,5 +62,27 @@ export class CoffeesService {
             throw new NotFoundException(`Invalid ID format`);
         }
         return this.coffeeModel.deleteOne({ _id: new Types.ObjectId(id) }).exec();
+    }
+
+    async recommendCoffee(coffee: Coffee) {
+        const session = await this.connection.startSession();
+        session.startTransaction();
+
+        try {
+            coffee.recommendations++;
+            const recommendEvent = new this.eventMovel({
+                name: 'recommend_coffee',
+                type: 'coffee',
+                payload: { coffeeId: coffee.id}
+            })
+            await recommendEvent.save({ session });
+            await coffee.save({ session });
+
+            await session.commitTransaction();
+        } catch (error) {
+            await session.abortTransaction();
+        } finally {
+            session.endSession();
+        }
     }
 }
